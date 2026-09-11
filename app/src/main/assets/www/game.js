@@ -41,46 +41,24 @@ async function checkMicPermission() {
 
 async function startMicCapture() {
   if (state.micReady) return { ok: true };
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    return { ok: false, error: "mediaDevices API unavailable in this WebView" };
+  if (!window.Android || !window.Android.startMicNative) {
+    return { ok: false, error: "Android mic bridge unavailable" };
   }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: false,
-        noiseSuppression: false,
-        autoGainControl: false,
-      },
-    });
-    state.audioCtx = state.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    const source = state.audioCtx.createMediaStreamSource(stream);
-    state.analyser = state.audioCtx.createAnalyser();
-    state.analyser.fftSize = 1024;
-    source.connect(state.analyser);
+  const ok = window.Android.startMicNative();
+  if (ok) {
     state.micReady = true;
-    pollMic();
     return { ok: true };
-  } catch (e) {
-    console.warn("mic unavailable", e);
-    return { ok: false, error: (e && e.name ? e.name : "Error") + ": " + (e && e.message ? e.message : String(e)) };
   }
+  return { ok: false, error: "Native AudioRecord initialization failed" };
 }
 
-function pollMic() {
-  const buf = new Float32Array(state.analyser.fftSize);
-  function tick() {
-    if (!state.micReady) return;
-    state.analyser.getFloatTimeDomainData(buf);
-    let sum = 0;
-    for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-    const rms = Math.sqrt(sum / buf.length);
-    const now = performance.now();
-    state.ampLog.push({ t: now, rms });
-    while (state.ampLog.length && now - state.ampLog[0].t > 4000) state.ampLog.shift();
-    requestAnimationFrame(tick);
-  }
-  requestAnimationFrame(tick);
-}
+// The native side pushes a volume (RMS) reading a few dozen times a second;
+// we just log it with a timestamp, same shape as the old Web Audio version.
+window.onMicAmplitude = function (rms) {
+  const now = performance.now();
+  state.ampLog.push({ t: now, rms });
+  while (state.ampLog.length && now - state.ampLog[0].t > 4000) state.ampLog.shift();
+};
 
 function currentAmp() {
   const now = performance.now();

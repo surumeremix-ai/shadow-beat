@@ -336,6 +336,16 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
         }
+
+        @JavascriptInterface
+        public boolean startMicNative() {
+            return startNativeMicCapture();
+        }
+
+        @JavascriptInterface
+        public void stopMicNative() {
+            stopNativeMicCapture();
+        }
     }
 
     private void toPage(final String js) {
@@ -432,10 +442,79 @@ public class MainActivity extends AppCompatActivity {
         return s == null ? "" : s.replace("\\", "\\\\").replace("'", "\\'");
     }
 
+    /* ---------------- native mic capture (bypasses WebView getUserMedia) ----------------
+       Some Android WebView builds fail getUserMedia audio with NotReadableError even
+       with a permission granted and no other app using the mic. Reading the microphone
+       directly with AudioRecord sidesteps that WebView audio-capture pipeline entirely;
+       we push a volume (RMS) reading to the page a few dozen times a second instead. */
+
+    private static final int MIC_SAMPLE_RATE = 16000;
+    private android.media.AudioRecord audioRecord;
+    private Thread micThread;
+    private volatile boolean micRunning = false;
+
+    private boolean startNativeMicCapture() {
+        if (!hasMicPermission()) return false;
+        if (micRunning) return true;
+        try {
+            int minBuf = android.media.AudioRecord.getMinBufferSize(MIC_SAMPLE_RATE,
+                    android.media.AudioFormat.CHANNEL_IN_MONO, android.media.AudioFormat.ENCODING_PCM_16BIT);
+            if (minBuf <= 0) return false;
+            audioRecord = new android.media.AudioRecord(android.media.MediaRecorder.AudioSource.MIC,
+                    MIC_SAMPLE_RATE, android.media.AudioFormat.CHANNEL_IN_MONO,
+                    android.media.AudioFormat.ENCODING_PCM_16BIT, minBuf * 2);
+            if (audioRecord.getState() != android.media.AudioRecord.STATE_INITIALIZED) {
+                audioRecord.release();
+                audioRecord = null;
+                return false;
+            }
+            audioRecord.startRecording();
+            micRunning = true;
+            final short[] buffer = new short[Math.max(256, minBuf / 2)];
+            micThread = new Thread(() -> {
+                while (micRunning) {
+                    android.media.AudioRecord ar = audioRecord;
+                    if (ar == null) break;
+                    int n = ar.read(buffer, 0, buffer.length);
+                    if (n > 0) {
+                        double sum = 0;
+                        for (int i = 0; i < n; i++) {
+                            double v = buffer[i] / 32768.0;
+                            sum += v * v;
+                        }
+                        final double rms = Math.sqrt(sum / n);
+                        toPage("window.onMicAmplitude && window.onMicAmplitude(" + rms + ")");
+                    }
+                    try { Thread.sleep(30); } catch (InterruptedException ignored) { }
+                }
+            });
+            micThread.start();
+            return true;
+        } catch (Exception e) {
+            micRunning = false;
+            if (audioRecord != null) { audioRecord.release(); audioRecord = null; }
+            return false;
+        }
+    }
+
+    private void stopNativeMicCapture() {
+        micRunning = false;
+        if (micThread != null) {
+            try { micThread.join(200); } catch (InterruptedException ignored) { }
+            micThread = null;
+        }
+        if (audioRecord != null) {
+            try { audioRecord.stop(); } catch (Exception ignored) { }
+            audioRecord.release();
+            audioRecord = null;
+        }
+    }
+
     /* ---------------- lifecycle ---------------- */
 
     @Override protected void onPause() {
         if (banner != null) banner.pause();
+        stopNativeMicCapture();
         web.onPause();
         web.pauseTimers();
         super.onPause();
@@ -450,6 +529,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override protected void onDestroy() {
         if (banner != null) banner.destroy();
+        stopNativeMicCapture();
         if (tts != null) { tts.stop(); tts.shutdown(); }
         super.onDestroy();
     }
