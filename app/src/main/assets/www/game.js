@@ -58,6 +58,17 @@ function saveSettings(s) {
 
 async function ensureMic() {
   if (state.micReady) return true;
+
+  // First make sure Android's runtime permission is granted; the WebView's
+  // own getUserMedia prompt can only succeed once that is true.
+  if (window.Android && window.Android.requestMicPermission) {
+    const granted = await new Promise((resolve) => {
+      window.onMicPermissionResult = (ok) => resolve(ok);
+      window.Android.requestMicPermission();
+    });
+    if (!granted) return false;
+  }
+
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();

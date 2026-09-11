@@ -119,7 +119,6 @@ public class MainActivity extends AppCompatActivity {
         web.addJavascriptInterface(new JsBridge(), "Android");
         web.loadUrl("https://appassets.androidplatform.net/assets/www/shadow-beat.html");
 
-        requestMicPermissionIfNeeded();
         initTts();
         startConsentThenAds();
     }
@@ -138,6 +137,16 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                            @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == MIC_PERMISSION_REQUEST) {
+            boolean granted = hasMicPermission();
+            toPage("window.onMicPermissionResult && window.onMicPermissionResult(" + granted + ")");
+        }
+    }
+
     /* ---------------- text-to-speech (British English) ---------------- */
 
     private void initTts() {
@@ -146,6 +155,8 @@ public class MainActivity extends AppCompatActivity {
                 int result = tts.setLanguage(Locale.UK);
                 ttsReady = result != TextToSpeech.LANG_MISSING_DATA
                         && result != TextToSpeech.LANG_NOT_SUPPORTED;
+                pickBestVoice();
+                tts.setSpeechRate(0.92f); // slightly slower helps clarity for learners
                 tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
                     @Override public void onStart(String utteranceId) { }
                     @Override public void onDone(String utteranceId) {
@@ -157,6 +168,28 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         });
+    }
+
+    /** Picks the most natural-sounding installed en-GB voice available.
+     *  Many devices ship several: a small robotic one plus higher-quality
+     *  ones (some network-based). We prefer the highest declared quality,
+     *  and among ties prefer a voice that doesn't require a network
+     *  connection so speech still works offline. */
+    private void pickBestVoice() {
+        if (tts == null) return;
+        try {
+            android.speech.tts.Voice best = null;
+            for (android.speech.tts.Voice v : tts.getVoices()) {
+                if (v.getLocale() == null || !"GBR".equals(v.getLocale().getISO3Country())
+                        && !"GB".equalsIgnoreCase(v.getLocale().getCountry())) continue;
+                if (v.isNetworkConnectionRequired() && best != null && !best.isNetworkConnectionRequired()
+                        && best.getQuality() >= v.getQuality()) continue;
+                if (best == null || v.getQuality() > best.getQuality()) best = v;
+            }
+            if (best != null) tts.setVoice(best);
+        } catch (Exception e) {
+            // if voice enumeration fails on this device, just keep the default
+        }
     }
 
     /* ---------------- consent (required wherever GDPR/UK GDPR applies) ----------------
@@ -213,6 +246,18 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void showRewarded(final String tag) {
             runOnUiThread(() -> presentRewarded(tag));
+        }
+
+        @JavascriptInterface
+        public void requestMicPermission() {
+            runOnUiThread(() -> {
+                if (hasMicPermission()) {
+                    toPage("window.onMicPermissionResult && window.onMicPermissionResult(true)");
+                } else {
+                    ActivityCompat.requestPermissions(MainActivity.this,
+                            new String[]{Manifest.permission.RECORD_AUDIO}, MIC_PERMISSION_REQUEST);
+                }
+            });
         }
     }
 

@@ -136,7 +136,11 @@ function screenStageIntro(trackKey, idx) {
   el("btnGo").onclick = async () => {
     const ok = await ensureMic();
     if (!ok) {
-      alert("マイクが使えないと判定できません。設定でマイクを許可してください。");
+      alert(
+        "マイクの許可がないと判定できません。\n" +
+        "許可ダイアログで「許可しない」を選んだ場合は、端末の設定アプリ → アプリ → Shadow Beat → 権限 から\n" +
+        "マイクを手動でONにしてください。"
+      );
       return;
     }
     screenGame(trackKey, idx);
