@@ -133,14 +133,11 @@ async function runSession(trackKey) {
   const stages = track.stages.slice(0, QUESTIONS_PER_GAME);
   const results = [];
 
-  startMetronome(track.bpm);
-
   for (let q = 0; q < stages.length; q++) {
     const result = await runQuestion(track, stages[q], q, stages.length);
     results.push(result);
   }
 
-  stopMetronome();
   showInterstitial("session_clear");
   screenSessionResult(trackKey, results);
 }
@@ -158,15 +155,21 @@ function renderQuestionScreen(stage, qNum, qTotal) {
   show(`
     <div class="screen game-screen">
       <div class="hud">
-        <span>${stage.title}</span>
-        <span>問題 ${qNum + 1} / ${qTotal}</span>
+        <span class="hud-title">${stage.title}</span>
+        <span class="hud-count">${qNum + 1} / ${qTotal}</span>
       </div>
       <p class="dialogue-line dim">${stage.line}</p>
       <div class="ball-track">
         <div class="ball" id="ball"></div>
       </div>
-      <div class="card-row" id="cardRow">${cards}</div>
+      <div class="card-row-wrap">
+        <div class="card-row" id="cardRow">${cards}</div>
+      </div>
       <div class="phase-tag" id="phaseTag">Listen</div>
+      <div class="mic-meter-wrap" id="micMeterWrap" style="visibility:hidden">
+        <span class="mic-icon">🎤</span>
+        <div class="mic-meter-track"><div class="mic-meter-fill" id="micMeter"></div></div>
+      </div>
       <div class="popup" id="popup"></div>
     </div>
   `);
@@ -184,6 +187,7 @@ function moveBallTo(index, cardCount) {
   const ball = el("ball");
   const card = el("wcard-" + index);
   if (!ball || !card) return;
+  card.scrollIntoView({ behavior: "auto", inline: "center", block: "nearest" });
   const row = el("cardRow");
   const rowRect = row.getBoundingClientRect();
   const cardRect = card.getBoundingClientRect();
@@ -216,23 +220,76 @@ async function playDemoOnce(stage) {
     const idx = findWordIndexForRange(stage, start, end);
     if (idx !== -1) {
       moveBallTo(idx, stage.words.length);
+      wordClick();
       timings[idx] = performance.now() - startTs;
     }
   });
   return timings;
 }
 
-function playerTurn(stage, referenceTimings) {
+function renderRaceScreen(stage, qNum, qTotal, phaseLabel) {
+  show(`
+    <div class="screen game-screen">
+      <div class="hud">
+        <span class="hud-title">${stage.title}</span>
+        <span class="hud-count">${qNum + 1} / ${qTotal}</span>
+      </div>
+      <p class="dialogue-line dim">${stage.line}</p>
+      <div class="phase-tag" id="phaseTag">${phaseLabel}</div>
+      <div class="race-track" id="raceTrack">
+        <div class="race-hitline"></div>
+        <div class="race-car" id="raceCar">🚗</div>
+      </div>
+      <div class="mic-meter-wrap" id="micMeterWrap">
+        <span class="mic-icon">🎤</span>
+        <div class="mic-meter-track"><div class="mic-meter-fill" id="micMeter"></div></div>
+      </div>
+      <div class="popup" id="popup"></div>
+    </div>
+  `);
+}
+
+function playerTurn(stage, referenceTimings, qNum, qTotal, phaseLabel) {
   return new Promise((resolve) => {
+    renderRaceScreen(stage, qNum, qTotal, phaseLabel);
+    const ipaOn = loadSettings().ipaVisible !== false;
+    const track = el("raceTrack");
+    const HIT_X = 60;
+    const LEAD_MS = 1800;
+    const trackWidth = track.clientWidth || 380;
+    const speed = (trackWidth - HIT_X) / LEAD_MS; // px per ms of lead time
+
     const words = stage.words;
+    const noteEls = words.map((w) => {
+      const d = document.createElement("div");
+      d.className = "race-note";
+      d.innerHTML = `<div class="race-note-word">${renderWord(w)}</div>` +
+        (ipaOn ? `<div class="race-note-ipa">${w.ipa}</div>` : "");
+      track.appendChild(d);
+      return d;
+    });
+
     const startTs = performance.now();
     const actualTimings = new Array(words.length).fill(null);
-    let idx = 0;
-    let lastOnsetT = -Infinity;
-    let loudSum = 0;
+    let idx = 0, lastOnsetT = -Infinity, loudSum = 0, running = true;
     const REFRACTORY = 260;
     const lastRef = referenceTimings[referenceTimings.length - 1] || 2000;
     const timeoutMs = lastRef + 2200;
+
+    function raf() {
+      if (!running) return;
+      const now = performance.now() - startTs;
+      noteEls.forEach((d, i) => {
+        const target = referenceTimings[i] != null ? referenceTimings[i] : lastRef;
+        const x = HIT_X + (target - now) * speed;
+        d.style.transform = `translateX(${x}px)`;
+        d.style.opacity = x < -90 ? 0 : 1;
+      });
+      const bar = el("micMeter");
+      if (bar) bar.style.width = Math.round(micLevel01() * 100) + "%";
+      requestAnimationFrame(raf);
+    }
+    requestAnimationFrame(raf);
 
     const iv = setInterval(() => {
       const now = performance.now();
@@ -240,7 +297,10 @@ function playerTurn(stage, referenceTimings) {
       if (amp > 0.03 && now - lastOnsetT > REFRACTORY && idx < words.length) {
         lastOnsetT = now;
         actualTimings[idx] = now - startTs;
-        moveBallTo(idx, words.length);
+        wordClick();
+        const car = el("raceCar");
+        if (car) { car.classList.remove("hit"); void car.offsetWidth; car.classList.add("hit"); }
+        if (noteEls[idx]) noteEls[idx].classList.add("hit-flash");
         loudSum += Math.min(1, Math.max(0, (amp - 0.015) / 0.2));
         idx++;
         if (idx >= words.length) finish();
@@ -250,6 +310,7 @@ function playerTurn(stage, referenceTimings) {
     const to = setTimeout(finish, timeoutMs);
 
     function finish() {
+      running = false;
       clearInterval(iv);
       clearTimeout(to);
       let timingPts = 0, count = 0;
@@ -293,8 +354,8 @@ async function runQuestion(track, stage, qIndex, qTotal) {
   let passed = false;
   let lastScore = 0;
   while (attempt <= MAX_ATTEMPTS && !passed) {
-    setPhase(attempt === 1 ? "🎤 Your turn!" : `🎤 Your turn! (${attempt}/${MAX_ATTEMPTS})`);
-    const result = await playerTurn(stage, referenceTimings);
+    const phaseLabel = attempt === 1 ? "🎤 Your turn!" : `🎤 Your turn! (${attempt}/${MAX_ATTEMPTS})`;
+    const result = await playerTurn(stage, referenceTimings, qIndex, qTotal, phaseLabel);
     lastScore = result.score;
     if (result.score >= PASS_LINE) {
       passed = true;

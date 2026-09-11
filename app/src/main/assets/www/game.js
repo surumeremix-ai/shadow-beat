@@ -71,6 +71,10 @@ function currentAmp() {
   return peak;
 }
 
+function micLevel01() {
+  return Math.min(1, Math.max(0, (currentAmp() - 0.008) / 0.18));
+}
+
 /* ---------------- sound effects & metronome (Web Audio synth, no assets needed) ---------------- */
 
 function ensureAudioCtx() {
@@ -90,19 +94,16 @@ function beepClick(strong) {
   osc.stop(ctx.currentTime + 0.08);
 }
 
-function startMetronome(bpm) {
-  stopMetronome();
-  const beatMs = 60000 / bpm;
-  let beat = 0;
-  beepClick(true);
-  state.metronomeHandle = setInterval(() => {
-    beat = (beat + 1) % 4;
-    beepClick(beat === 0);
-  }, beatMs);
-}
-function stopMetronome() {
-  if (state.metronomeHandle) clearInterval(state.metronomeHandle);
-  state.metronomeHandle = null;
+function wordClick() {
+  const ctx = ensureAudioCtx();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.frequency.value = 1200;
+  gain.gain.setValueAtTime(0.16, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+  osc.connect(gain).connect(ctx.destination);
+  osc.start();
+  osc.stop(ctx.currentTime + 0.07);
 }
 
 function playSuccessChime() {
