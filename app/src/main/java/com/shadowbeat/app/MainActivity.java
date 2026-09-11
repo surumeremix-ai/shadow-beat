@@ -174,9 +174,16 @@ public class MainActivity extends AppCompatActivity {
      *  Many devices ship several: a small robotic one plus higher-quality
      *  ones (some network-based). We prefer the highest declared quality,
      *  and among ties prefer a voice that doesn't require a network
-     *  connection so speech still works offline. */
+     *  connection so speech still works offline. A voice the player picked
+     *  manually in Settings always wins over the automatic choice. */
     private void pickBestVoice() {
         if (tts == null) return;
+        String saved = getSharedPreferences("tts", MODE_PRIVATE).getString("voice_name", null);
+        if (saved != null) {
+            for (android.speech.tts.Voice v : tts.getVoices()) {
+                if (v.getName().equals(saved)) { tts.setVoice(v); return; }
+            }
+        }
         try {
             android.speech.tts.Voice best = null;
             for (android.speech.tts.Voice v : tts.getVoices()) {
@@ -190,6 +197,34 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             // if voice enumeration fails on this device, just keep the default
         }
+    }
+
+    /** en-GB voices on this device, as a JSON array the page can render as a picker:
+     *  [{"name":"...", "quality":"高音質"/"標準", "network":true/false, "current":true/false}, ...] */
+    private String voicesAsJson() {
+        StringBuilder sb = new StringBuilder("[");
+        if (tts != null) {
+            android.speech.tts.Voice current = tts.getVoice();
+            boolean first = true;
+            for (android.speech.tts.Voice v : tts.getVoices()) {
+                if (v.getLocale() == null) continue;
+                boolean isGb = "GBR".equals(v.getLocale().getISO3Country())
+                        || "GB".equalsIgnoreCase(v.getLocale().getCountry());
+                if (!isGb) continue;
+                String quality = v.getQuality() >= android.speech.tts.Voice.QUALITY_HIGH
+                        ? "高音質" : v.getQuality() >= android.speech.tts.Voice.QUALITY_NORMAL
+                        ? "標準" : "低音質";
+                if (!first) sb.append(",");
+                first = false;
+                sb.append("{\"name\":\"").append(esc(v.getName())).append("\",")
+                  .append("\"quality\":\"").append(quality).append("\",")
+                  .append("\"network\":").append(v.isNetworkConnectionRequired()).append(",")
+                  .append("\"current\":").append(current != null && current.getName().equals(v.getName()))
+                  .append("}");
+            }
+        }
+        sb.append("]");
+        return sb.toString();
     }
 
     /* ---------------- consent (required wherever GDPR/UK GDPR applies) ----------------
@@ -256,6 +291,39 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     ActivityCompat.requestPermissions(MainActivity.this,
                             new String[]{Manifest.permission.RECORD_AUDIO}, MIC_PERMISSION_REQUEST);
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public String listVoices() {
+            return voicesAsJson();
+        }
+
+        @JavascriptInterface
+        public void setVoiceByName(final String name) {
+            runOnUiThread(() -> {
+                if (tts == null) return;
+                for (android.speech.tts.Voice v : tts.getVoices()) {
+                    if (v.getName().equals(name)) {
+                        tts.setVoice(v);
+                        getSharedPreferences("tts", MODE_PRIVATE).edit()
+                                .putString("voice_name", name).apply();
+                        break;
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void openVoiceDownload() {
+            runOnUiThread(() -> {
+                try {
+                    android.content.Intent intent =
+                            new android.content.Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA);
+                    startActivity(intent);
+                } catch (Exception e) {
+                    // no TTS engine settings screen available on this device
                 }
             });
         }

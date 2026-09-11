@@ -42,6 +42,8 @@ function screenSettings() {
         <span>発音記号 (IPA) を表示</span>
         <input type="checkbox" id="chkIpa" ${ipaOn ? "checked" : ""}/>
       </label>
+      <button class="btn-ghost" id="btnVoice">🔊 読み上げの声を選ぶ</button>
+      <button class="btn-ghost" id="btnDownloadVoice">⬇ 音声データをダウンロード</button>
       <button class="btn-neon" id="btnBack">戻る</button>
     </div>
   `);
@@ -51,7 +53,55 @@ function screenSettings() {
     saveSettings(s2);
     state.ipaVisible = e.target.checked;
   };
+  el("btnVoice").onclick = () => screenVoicePicker();
+  el("btnDownloadVoice").onclick = () => {
+    if (window.Android && window.Android.openVoiceDownload) {
+      window.Android.openVoiceDownload();
+    } else {
+      alert("この画面はアプリ内でのみ使えます。");
+    }
+  };
   el("btnBack").onclick = () => screenTitle();
+}
+
+/* ---------------- voice picker ---------------- */
+
+function screenVoicePicker() {
+  let voices = [];
+  try {
+    voices = window.Android && window.Android.listVoices ? JSON.parse(window.Android.listVoices()) : [];
+  } catch (e) {
+    voices = [];
+  }
+  const rows = voices.length
+    ? voices
+        .map(
+          (v) => `
+        <button class="voice-item ${v.current ? "selected" : ""}" data-name="${v.name}">
+          <span class="voice-name">${v.name}</span>
+          <span class="voice-quality">${v.quality}${v.network ? " ・ 通信要" : ""}</span>
+          ${v.current ? '<span class="voice-check">✓</span>' : ""}
+        </button>`
+        )
+        .join("")
+    : `<p class="hint">端末にイギリス英語の音声が見つかりませんでした。<br>「音声データをダウンロード」から追加してください。</p>`;
+  show(`
+    <div class="screen voice-screen">
+      <h2>読み上げの声を選ぶ</h2>
+      <div class="voice-list">${rows}</div>
+      <button class="btn-ghost" id="btnBack">設定に戻る</button>
+    </div>
+  `);
+  app.querySelectorAll(".voice-item").forEach((btn) => {
+    btn.onclick = () => {
+      if (window.Android && window.Android.setVoiceByName) {
+        window.Android.setVoiceByName(btn.dataset.name);
+      }
+      speak("This is a sample of this voice.");
+      screenVoicePicker();
+    };
+  });
+  el("btnBack").onclick = () => screenSettings();
 }
 
 /* ---------------- track select ---------------- */
