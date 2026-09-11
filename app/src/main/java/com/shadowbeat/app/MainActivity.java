@@ -284,6 +284,11 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
+        public boolean hasMicPermissionSync() {
+            return hasMicPermission();
+        }
+
+        @JavascriptInterface
         public void requestMicPermission() {
             runOnUiThread(() -> {
                 if (hasMicPermission()) {

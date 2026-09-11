@@ -56,19 +56,27 @@ function saveSettings(s) {
 
 /* ---------------- microphone ---------------- */
 
-async function ensureMic() {
-  if (state.micReady) return true;
-
-  // First make sure Android's runtime permission is granted; the WebView's
-  // own getUserMedia prompt can only succeed once that is true.
-  if (window.Android && window.Android.requestMicPermission) {
-    const granted = await new Promise((resolve) => {
-      window.onMicPermissionResult = (ok) => resolve(ok);
-      window.Android.requestMicPermission();
-    });
-    if (!granted) return false;
+// Returns "granted" | "asked" | "unavailable".
+//  - "granted": Android permission was already on — caller should call
+//    getUserMedia() itself, in the SAME synchronous click handler, so the
+//    tap that triggered this call still counts as a user gesture for it.
+//  - "asked": the system dialog was just shown; the player needs to tap
+//    START again once they answer it (chaining straight into getUserMedia
+//    here would no longer count as a user gesture, since a native modal
+//    dialog appeared in between).
+async function checkMicPermission() {
+  if (!window.Android || !window.Android.requestMicPermission) return "unavailable";
+  if (window.Android.hasMicPermissionSync && window.Android.hasMicPermissionSync()) {
+    return "granted";
   }
+  await new Promise((resolve) => {
+    window.onMicPermissionResult = () => resolve();
+    window.Android.requestMicPermission();
+  });
+  return "asked";
+}
 
+async function startMicCapture() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();

@@ -184,16 +184,25 @@ function screenStageIntro(trackKey, idx) {
   `);
   el("btnListen").onclick = () => speak(stage.line);
   el("btnGo").onclick = async () => {
-    const ok = await ensureMic();
-    if (!ok) {
-      alert(
-        "マイクの許可がないと判定できません。\n" +
-        "許可ダイアログで「許可しない」を選んだ場合は、端末の設定アプリ → アプリ → Shadow Beat → 権限 から\n" +
-        "マイクを手動でONにしてください。"
-      );
+    if (state.micReady) {
+      screenGame(trackKey, idx);
       return;
     }
-    screenGame(trackKey, idx);
+    const status = await checkMicPermission();
+    if (status === "granted") {
+      const ok = await startMicCapture();
+      if (!ok) {
+        alert("マイクを起動できませんでした。もう一度お試しください。");
+        return;
+      }
+      screenGame(trackKey, idx);
+    } else if (status === "asked") {
+      // A system dialog just appeared; whatever the player chose, tapping
+      // START again now runs getUserMedia inside a fresh, uninterrupted tap.
+      alert("マイクの許可を確認しました。もう一度「START」を押してください。");
+    } else {
+      alert("マイクが使えないと判定できません。");
+    }
   };
   el("btnBack").onclick = () => screenStages(trackKey);
 }
