@@ -117,7 +117,7 @@ public class MainActivity extends AppCompatActivity {
 
         web.setBackgroundColor(0xFF0D0B1A);
         web.addJavascriptInterface(new JsBridge(), "Android");
-        web.loadUrl("https://appassets.androidplatform.net/assets/shadow-beat.html");
+        web.loadUrl("https://appassets.androidplatform.net/assets/www/shadow-beat.html");
 
         requestMicPermissionIfNeeded();
         initTts();
