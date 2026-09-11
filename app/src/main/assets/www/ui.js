@@ -1,23 +1,16 @@
-// Shadow Beat — screen flow and gameplay loop.
+// Shadow Beat — screen flow (v2): title → track select → session of 5
+// questions (demo x2, then the player's turn) → session result.
 
 const app = document.getElementById("app");
-let currentAttemptScores = [];
-let activeNotes = [];
-let beatTimerHandle = null;
-let stageEndTimeoutHandle = null;
 
-function show(html) {
-  app.innerHTML = html;
-}
-
-function el(id) {
-  return document.getElementById(id);
-}
+function show(html) { app.innerHTML = html; }
+function el(id) { return document.getElementById(id); }
 
 /* ---------------- title screen ---------------- */
 
 function screenTitle() {
   setBanner(false);
+  stopMetronome();
   show(`
     <div class="screen title-screen">
       <div class="logo">SHADOW<span class="accent">BEAT</span></div>
@@ -55,35 +48,24 @@ function screenSettings() {
   };
   el("btnVoice").onclick = () => screenVoicePicker();
   el("btnDownloadVoice").onclick = () => {
-    if (window.Android && window.Android.openVoiceDownload) {
-      window.Android.openVoiceDownload();
-    } else {
-      alert("この画面はアプリ内でのみ使えます。");
-    }
+    if (window.Android && window.Android.openVoiceDownload) window.Android.openVoiceDownload();
+    else alert("この画面はアプリ内でのみ使えます。");
   };
   el("btnBack").onclick = () => screenTitle();
 }
-
-/* ---------------- voice picker ---------------- */
 
 function screenVoicePicker() {
   let voices = [];
   try {
     voices = window.Android && window.Android.listVoices ? JSON.parse(window.Android.listVoices()) : [];
-  } catch (e) {
-    voices = [];
-  }
+  } catch (e) { voices = []; }
   const rows = voices.length
-    ? voices
-        .map(
-          (v) => `
+    ? voices.map((v) => `
         <button class="voice-item ${v.current ? "selected" : ""}" data-name="${v.name}">
           <span class="voice-name">${v.name}</span>
           <span class="voice-quality">${v.quality}${v.network ? " ・ 通信要" : ""}</span>
           ${v.current ? '<span class="voice-check">✓</span>' : ""}
-        </button>`
-        )
-        .join("")
+        </button>`).join("")
     : `<p class="hint">端末にイギリス英語の音声が見つかりませんでした。<br>「音声データをダウンロード」から追加してください。</p>`;
   show(`
     <div class="screen voice-screen">
@@ -94,9 +76,7 @@ function screenVoicePicker() {
   `);
   app.querySelectorAll(".voice-item").forEach((btn) => {
     btn.onclick = () => {
-      if (window.Android && window.Android.setVoiceByName) {
-        window.Android.setVoiceByName(btn.dataset.name);
-      }
+      if (window.Android && window.Android.setVoiceByName) window.Android.setVoiceByName(btn.dataset.name);
       speak("This is a sample of this voice.");
       screenVoicePicker();
     };
@@ -108,18 +88,14 @@ function screenVoicePicker() {
 
 function screenTracks() {
   setBanner(true);
-  const progress = loadProgress();
-  const cards = Object.keys(TRACKS)
-    .map((key) => {
-      const t = TRACKS[key];
-      const cleared = progress[key] ? Object.keys(progress[key]).length : 0;
-      return `
-        <button class="track-card" data-track="${key}">
-          <div class="track-name">${t.name}</div>
-          <div class="track-progress">${cleared} / ${t.stages.length} クリア</div>
-        </button>`;
-    })
-    .join("");
+  const cards = Object.keys(TRACKS).map((key) => {
+    const t = TRACKS[key];
+    return `
+      <button class="track-card" data-track="${key}">
+        <div class="track-name">${t.name}</div>
+        <div class="track-progress">1ゲーム = ${QUESTIONS_PER_GAME}問</div>
+      </button>`;
+  }).join("");
   show(`
     <div class="screen tracks-screen">
       <h2>コースを選ぶ</h2>
@@ -128,181 +104,69 @@ function screenTracks() {
     </div>
   `);
   app.querySelectorAll(".track-card").forEach((btn) => {
-    btn.onclick = () => screenStages(btn.dataset.track);
+    btn.onclick = () => startSession(btn.dataset.track);
   });
   el("btnBack").onclick = () => screenTitle();
 }
 
-/* ---------------- stage select ---------------- */
+/* ---------------- session (5 questions) ---------------- */
 
-function screenStages(trackKey) {
-  state.track = trackKey;
-  const t = TRACKS[trackKey];
-  const progress = loadProgress();
-  const items = t.stages
-    .map((st, i) => {
-      const unlocked = isStageUnlocked(trackKey, i);
-      const cleared = !!(progress[trackKey] && progress[trackKey][i]);
-      const cls = !unlocked ? "locked" : cleared ? "cleared" : "";
-      return `
-        <button class="stage-item ${cls}" data-idx="${i}" ${!unlocked ? "disabled" : ""}>
-          <span class="stage-num">${i + 1}</span>
-          <span class="stage-title">${st.title}</span>
-          <span class="stage-mark">${cleared ? "★" : unlocked ? "" : "🔒"}</span>
-        </button>`;
-    })
-    .join("");
-  show(`
-    <div class="screen stages-screen">
-      <h2>${t.name}</h2>
-      <div class="stage-list">${items}</div>
-      <button class="btn-ghost" id="btnBack">コース選択に戻る</button>
-    </div>
-  `);
-  app.querySelectorAll(".stage-item:not([disabled])").forEach((btn) => {
-    btn.onclick = () => screenStageIntro(trackKey, parseInt(btn.dataset.idx, 10));
-  });
-  el("btnBack").onclick = () => screenTracks();
+async function startSession(trackKey) {
+  const status = await checkMicPermission();
+  if (status === "granted") {
+    const ok = await startMicCapture();
+    if (!ok) { alert("マイクを起動できませんでした。もう一度お試しください。"); return; }
+    runSession(trackKey);
+  } else if (status === "asked") {
+    alert("マイクの許可を確認しました。もう一度コースを選んでください。");
+  } else {
+    alert("マイクが使えないと判定できません。");
+  }
 }
 
-/* ---------------- stage intro (hear the dialogue first) ---------------- */
-
-function screenStageIntro(trackKey, idx) {
-  state.track = trackKey;
-  state.stageIndex = idx;
-  state.attempt = 1;
-  const stage = TRACKS[trackKey].stages[idx];
-  show(`
-    <div class="screen intro-screen">
-      <h2>${stage.title}</h2>
-      <p class="dialogue-line">${stage.line}</p>
-      <button class="btn-ghost" id="btnListen">🔊 会話を聞く</button>
-      <button class="btn-neon" id="btnGo">START</button>
-      <button class="btn-ghost" id="btnBack">ステージ選択に戻る</button>
-      <p class="hint">マイクへのアクセスを求められたら許可してください</p>
-    </div>
-  `);
-  el("btnListen").onclick = () => speak(stage.line);
-  el("btnGo").onclick = async () => {
-    if (state.micReady) {
-      screenGame(trackKey, idx);
-      return;
-    }
-    const status = await checkMicPermission();
-    if (status === "granted") {
-      const ok = await startMicCapture();
-      if (!ok) {
-        alert("マイクを起動できませんでした。もう一度お試しください。");
-        return;
-      }
-      screenGame(trackKey, idx);
-    } else if (status === "asked") {
-      // A system dialog just appeared; whatever the player chose, tapping
-      // START again now runs getUserMedia inside a fresh, uninterrupted tap.
-      alert("マイクの許可を確認しました。もう一度「START」を押してください。");
-    } else {
-      alert("マイクが使えないと判定できません。");
-    }
-  };
-  el("btnBack").onclick = () => screenStages(trackKey);
-}
-
-/* ---------------- gameplay ---------------- */
-
-function screenGame(trackKey, idx) {
+async function runSession(trackKey) {
   setBanner(false);
   const track = TRACKS[trackKey];
-  const stage = track.stages[idx];
-  const bpm = track.bpm;
-  const beatMs = 60000 / bpm;
-  const barMs = beatMs * 4;
-  const words = stage.words;
-  const ipaOn = loadSettings().ipaVisible !== false;
+  const stages = track.stages.slice(0, QUESTIONS_PER_GAME);
+  const results = [];
 
+  startMetronome(track.bpm);
+
+  for (let q = 0; q < stages.length; q++) {
+    const result = await runQuestion(track, stages[q], q, stages.length);
+    results.push(result);
+  }
+
+  stopMetronome();
+  showInterstitial("session_clear");
+  screenSessionResult(trackKey, results);
+}
+
+/* ---------------- one question: demo x2 → player's turn(s) ---------------- */
+
+function renderQuestionScreen(stage, qNum, qTotal) {
+  const ipaOn = loadSettings().ipaVisible !== false;
+  const cards = stage.words.map((w, i) => `
+    <div class="wcard" id="wcard-${i}">
+      <div class="wcard-word">${renderWord(w)}</div>
+      ${ipaOn ? `<div class="wcard-ipa">${w.ipa}</div>` : ""}
+    </div>
+  `).join("");
   show(`
     <div class="screen game-screen">
       <div class="hud">
         <span>${stage.title}</span>
-        <span id="attemptTag">挑戦 ${state.attempt} / ${MAX_ATTEMPTS}</span>
+        <span>問題 ${qNum + 1} / ${qTotal}</span>
       </div>
-      <div class="lane" id="lane">
-        <div class="hit-line"></div>
+      <p class="dialogue-line dim">${stage.line}</p>
+      <div class="ball-track">
+        <div class="ball" id="ball"></div>
       </div>
-      <div class="beats" id="beats">
-        <span class="beat-dot" data-b="0"></span>
-        <span class="beat-dot" data-b="1"></span>
-        <span class="beat-dot" data-b="2"></span>
-        <span class="beat-dot" data-b="3"></span>
-      </div>
+      <div class="card-row" id="cardRow">${cards}</div>
+      <div class="phase-tag" id="phaseTag">Listen</div>
       <div class="popup" id="popup"></div>
     </div>
   `);
-
-  currentAttemptScores = [];
-  activeNotes = [];
-  const runId = ++state.runId;
-  const lane = el("lane");
-  const laneHeight = () => lane.clientHeight;
-
-  const startTime = performance.now() + barMs; // 1 bar lead-in
-  const beatDots = app.querySelectorAll(".beat-dot");
-
-  function beatLoop() {
-    if (runId !== state.runId) return;
-    const now = performance.now();
-    const beatIndex = Math.floor((now - startTime) / beatMs);
-    const phase = ((beatIndex % 4) + 4) % 4;
-    beatDots.forEach((d, i) => d.classList.toggle("on", i === phase));
-    beatTimerHandle = requestAnimationFrame(beatLoop);
-  }
-  beatLoop();
-
-  // schedule note spawns + judges
-  words.forEach((word, i) => {
-    const spawnAt = startTime + i * barMs;
-    const judgeAt = startTime + (i + 1) * barMs;
-    setTimeout(() => {
-      if (runId !== state.runId) return;
-      spawnNote(word, spawnAt, judgeAt, barMs, ipaOn, lane, laneHeight);
-    }, Math.max(0, spawnAt - performance.now()));
-    setTimeout(() => {
-      if (runId !== state.runId) return;
-      const result = judgeWord(judgeAt);
-      currentAttemptScores.push(result);
-      showPopup(result.grade);
-    }, Math.max(0, judgeAt - performance.now()));
-  });
-
-  const totalDuration = startTime - performance.now() + (words.length + 1) * barMs;
-  stageEndTimeoutHandle = setTimeout(() => {
-    if (runId !== state.runId) return;
-    cancelAnimationFrame(beatTimerHandle);
-    finishAttempt(trackKey, idx);
-  }, totalDuration);
-}
-
-function spawnNote(word, spawnAt, judgeAt, barMs, ipaOn, lane, laneHeight) {
-  const noteEl = document.createElement("div");
-  noteEl.className = "note";
-  noteEl.innerHTML = `
-    <div class="note-word">${renderWord(word)}</div>
-    ${ipaOn ? `<div class="note-ipa">${word.ipa}</div>` : ""}
-  `;
-  lane.appendChild(noteEl);
-
-  function frame() {
-    const now = performance.now();
-    const t = (now - spawnAt) / (judgeAt - spawnAt); // 0..1
-    if (t > 1.15) {
-      noteEl.remove();
-      return;
-    }
-    const h = laneHeight();
-    noteEl.style.transform = `translateY(${Math.min(t, 1) * (h - 90)}px)`;
-    noteEl.style.opacity = t > 1 ? Math.max(0, 1 - (t - 1) * 5) : 1;
-    requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
 }
 
 function renderWord(word) {
@@ -313,90 +177,176 @@ function renderWord(word) {
   return `${before}<b>${strong}</b>${after}`;
 }
 
-function showPopup(grade) {
+function moveBallTo(index, cardCount) {
+  const ball = el("ball");
+  const card = el("wcard-" + index);
+  if (!ball || !card) return;
+  const row = el("cardRow");
+  const rowRect = row.getBoundingClientRect();
+  const cardRect = card.getBoundingClientRect();
+  const x = cardRect.left - rowRect.left + cardRect.width / 2;
+  ball.style.left = x + "px";
+  ball.classList.remove("bounce");
+  void ball.offsetWidth; // restart animation
+  ball.classList.add("bounce");
+  app.querySelectorAll(".wcard").forEach((c) => c.classList.remove("active"));
+  card.classList.add("active");
+}
+
+function setPhase(text) {
+  const tag = el("phaseTag");
+  if (tag) tag.textContent = text;
+}
+
+function showPopup(text, cls) {
   const p = el("popup");
   if (!p) return;
-  p.textContent = grade;
-  p.className = "popup show grade-" + grade;
-  setTimeout(() => {
-    if (p) p.className = "popup";
-  }, 400);
+  p.textContent = text;
+  p.className = "popup show " + cls;
+  setTimeout(() => { if (p) p.className = "popup"; }, 500);
 }
 
-/* ---------------- result ---------------- */
+async function playDemoOnce(stage) {
+  const startTs = performance.now();
+  const timings = new Array(stage.words.length).fill(null);
+  await speakWithRangeTracking(stage.line, (start, end) => {
+    const idx = findWordIndexForRange(stage, start, end);
+    if (idx !== -1) {
+      moveBallTo(idx, stage.words.length);
+      timings[idx] = performance.now() - startTs;
+    }
+  });
+  return timings;
+}
 
-function finishAttempt(trackKey, idx) {
-  const total = currentAttemptScores.length
-    ? Math.round(currentAttemptScores.reduce((a, r) => a + r.points, 0) / currentAttemptScores.length)
-    : 0;
-  const passed = total >= PASS_LINE;
+function playerTurn(stage, referenceTimings) {
+  return new Promise((resolve) => {
+    const words = stage.words;
+    const startTs = performance.now();
+    const actualTimings = new Array(words.length).fill(null);
+    let idx = 0;
+    let lastOnsetT = -Infinity;
+    let loudSum = 0;
+    const REFRACTORY = 260;
+    const lastRef = referenceTimings[referenceTimings.length - 1] || 2000;
+    const timeoutMs = lastRef + 2200;
 
-  if (passed) {
-    markCleared(trackKey, idx);
-    showInterstitial("stage_clear");
+    const iv = setInterval(() => {
+      const now = performance.now();
+      const amp = currentAmp();
+      if (amp > 0.03 && now - lastOnsetT > REFRACTORY && idx < words.length) {
+        lastOnsetT = now;
+        actualTimings[idx] = now - startTs;
+        moveBallTo(idx, words.length);
+        loudSum += Math.min(1, Math.max(0, (amp - 0.015) / 0.2));
+        idx++;
+        if (idx >= words.length) finish();
+      }
+    }, 35);
+
+    const to = setTimeout(finish, timeoutMs);
+
+    function finish() {
+      clearInterval(iv);
+      clearTimeout(to);
+      let timingPts = 0, count = 0;
+      for (let i = 0; i < words.length; i++) {
+        if (actualTimings[i] == null) continue;
+        const ref = referenceTimings[i] != null ? referenceTimings[i] : lastRef;
+        const diff = Math.abs(actualTimings[i] - ref);
+        let pts;
+        if (diff <= 150) pts = 60;
+        else if (diff <= 300) pts = 40;
+        else if (diff <= 500) pts = 20;
+        else pts = 0;
+        timingPts += pts;
+        count++;
+      }
+      const avgTiming = count ? timingPts / count : 0;
+      const avgLoud = count ? (loudSum / count) * 40 : 0;
+      const perWordAvg = avgTiming + avgLoud;
+      const coverage = count / words.length;
+      const score = Math.round(Math.max(0, Math.min(100, perWordAvg * coverage)));
+      resolve({ score, count, total: words.length });
+    }
+  });
+}
+
+async function runQuestion(track, stage, qIndex, qTotal) {
+  computeWordRanges(stage);
+  renderQuestionScreen(stage, qIndex, qTotal);
+
+  setPhase("🔊 Listen");
+  await sleep(400);
+  await playDemoOnce(stage);
+  await sleep(500);
+
+  setPhase("🔊 Listen again");
+  await sleep(300);
+  const referenceTimings = await playDemoOnce(stage);
+  await sleep(600);
+
+  let attempt = 1;
+  let passed = false;
+  let lastScore = 0;
+  while (attempt <= MAX_ATTEMPTS && !passed) {
+    setPhase(attempt === 1 ? "🎤 Your turn!" : `🎤 Your turn! (${attempt}/${MAX_ATTEMPTS})`);
+    const result = await playerTurn(stage, referenceTimings);
+    lastScore = result.score;
+    if (result.score >= PASS_LINE) {
+      passed = true;
+      showPopup("CLEAR!", "grade-PERFECT");
+      playSuccessChime();
+      await sleep(900);
+    } else if (attempt < MAX_ATTEMPTS) {
+      showPopup("もう一度!", "grade-OK");
+      playFailBuzz();
+      await sleep(700);
+    }
+    attempt++;
   }
-
-  screenResult(trackKey, idx, total, passed);
+  if (!passed) {
+    showPopup("残念…", "grade-MISS");
+    playFailBuzz();
+    await sleep(800);
+  }
+  return { passed, score: lastScore };
 }
 
-function screenResult(trackKey, idx, total, passed) {
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+/* ---------------- session result ---------------- */
+
+function screenSessionResult(trackKey, results) {
   setBanner(true);
   const track = TRACKS[trackKey];
-  const isLastStage = idx === track.stages.length - 1;
-  const attemptsLeft = MAX_ATTEMPTS - state.attempt;
-
-  let actionsHtml = "";
-  if (passed) {
-    actionsHtml = isLastStage
-      ? `<button class="btn-neon" id="btnBack">コース選択に戻る</button>`
-      : `<button class="btn-neon" id="btnNext">次のステージへ</button>
-         <button class="btn-ghost" id="btnBack">ステージ選択に戻る</button>`;
-  } else if (attemptsLeft > 0) {
-    actionsHtml = `
-      <button class="btn-neon" id="btnRetry">もう一度 (${state.attempt + 1}/${MAX_ATTEMPTS})</button>
-      <button class="btn-ghost" id="btnBack">ステージ選択に戻る</button>`;
-  } else {
-    actionsHtml = `
-      <button class="btn-neon" id="btnRescue">📺 広告を見てもう1回</button>
-      <button class="btn-ghost" id="btnNextAnyway">このまま次へ${isLastStage ? "戻る" : "進む"}</button>`;
-  }
-
+  const clearedCount = results.filter((r) => r.passed).length;
+  const avgScore = Math.round(results.reduce((a, r) => a + r.score, 0) / results.length);
+  const rows = results.map((r, i) => `
+    <div class="result-row">
+      <span>問題 ${i + 1}</span>
+      <span>${r.score}点 ${r.passed ? "✅" : "△"}</span>
+    </div>
+  `).join("");
   show(`
     <div class="screen result-screen">
-      <h2>${passed ? "CLEAR!" : "スコア"}</h2>
-      <div class="score-big ${passed ? "score-pass" : "score-fail"}">${total}</div>
-      <div class="score-line">合格ライン: ${PASS_LINE}</div>
-      ${actionsHtml}
+      <h2>ゲームクリア!</h2>
+      <div class="score-big score-pass">${avgScore}</div>
+      <div class="score-line">${clearedCount} / ${results.length} 問クリア(平均点)</div>
+      <div class="result-list">${rows}</div>
+      <button class="btn-neon" id="btnAgain">もう一度 (${track.name})</button>
+      <button class="btn-ghost" id="btnBack">コース選択に戻る</button>
     </div>
   `);
-
-  if (el("btnNext")) el("btnNext").onclick = () => screenStageIntro(trackKey, idx + 1);
-  if (el("btnBack")) el("btnBack").onclick = () => screenStages(trackKey);
-  if (el("btnRetry"))
-    el("btnRetry").onclick = () => {
-      state.attempt += 1;
-      screenStageIntro(trackKey, idx);
-    };
-  if (el("btnNextAnyway"))
-    el("btnNextAnyway").onclick = () =>
-      isLastStage ? screenStages(trackKey) : screenStageIntro(trackKey, idx + 1);
-  if (el("btnRescue"))
-    el("btnRescue").onclick = () => {
-      requestRescue(
-        () => {
-          state.attempt = 1; // fresh set of tries after the rescue ad
-          screenStageIntro(trackKey, idx);
-        },
-        () => alert("広告を読み込めませんでした。もう一度お試しください。")
-      );
-    };
+  el("btnAgain").onclick = () => startSession(trackKey);
+  el("btnBack").onclick = () => screenTracks();
 }
 
-/* ---------------- back button (Android hardware back) ---------------- */
+/* ---------------- Android hardware back ---------------- */
 
 window.onBackPressed = function () {
-  // Let the title screen exit the app normally; everywhere else, go back a step.
   if (app.querySelector(".title-screen")) return false;
+  stopMetronome();
   screenTitle();
   return true;
 };

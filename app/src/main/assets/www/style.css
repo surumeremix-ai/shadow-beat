@@ -103,48 +103,55 @@ html, body {
 .dialogue-line { color: #d9d5f0; max-width: 340px; line-height: 1.6; }
 .hint { color: #7a71a8; font-size: 12px; }
 
-/* ---- gameplay ---- */
+/* ---- gameplay (v2: card row + hopping ball) ---- */
 .game-screen { justify-content: flex-start; padding-top: 12px; }
 .hud {
   width: 100%; max-width: 420px; display: flex; justify-content: space-between;
-  font-size: 13px; color: #b9b3d6; margin-bottom: 8px;
+  font-size: 13px; color: #b9b3d6; margin-bottom: 4px;
 }
-.lane {
-  position: relative;
-  width: 100%; max-width: 420px; height: 55vh;
-  border-left: 1px solid rgba(255,255,255,0.08);
-  border-right: 1px solid rgba(255,255,255,0.08);
-  overflow: hidden;
-}
-.hit-line {
-  position: absolute; left: 0; right: 0; bottom: 70px; height: 4px;
-  background: #26f7e8; box-shadow: 0 0 14px #26f7e8;
-}
-.note {
-  position: absolute; left: 8%; right: 8%; top: 0;
-  padding: 10px 8px; border-radius: 12px;
-  background: linear-gradient(135deg, #ff2ed1, #7a2ee8);
-  box-shadow: 0 0 14px rgba(255,46,209,0.6);
-  text-align: center;
-}
-.note-word { font-size: 20px; font-weight: 700; color: #fff; }
-.note-word b { color: #fffb2e; text-shadow: 0 0 8px #fffb2e; }
-.note-ipa { font-size: 12px; color: #ffe6fb; margin-top: 2px; }
+.dialogue-line.dim { color: #7a71a8; font-size: 13px; max-width: 380px; margin: 4px 0 18px; }
 
-.beats { display: flex; gap: 14px; margin-top: 14px; }
-.beat-dot {
-  width: 14px; height: 14px; border-radius: 50%;
-  background: rgba(255,255,255,0.15);
+.ball-track { position: relative; width: 100%; max-width: 420px; height: 46px; }
+.ball {
+  position: absolute; top: 0; width: 22px; height: 22px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fffb2e, #ff2ed1);
+  box-shadow: 0 0 16px #ff2ed1;
+  transform: translateX(-50%);
+  transition: left 0.12s ease-out;
 }
-.beat-dot.on { background: #26f7e8; box-shadow: 0 0 10px #26f7e8; }
+.ball.bounce { animation: ballhop 0.3s ease-out; }
+@keyframes ballhop {
+  0%   { top: 22px; }
+  40%  { top: -6px; }
+  100% { top: 0; }
+}
+
+.card-row {
+  display: flex; gap: 10px; overflow-x: auto; width: 100%; max-width: 420px;
+  padding: 6px 4px 14px;
+}
+.wcard {
+  flex: 0 0 auto; min-width: 74px; padding: 10px 12px; border-radius: 12px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12);
+  text-align: center; transition: all 0.15s;
+}
+.wcard.active {
+  background: linear-gradient(135deg, #ff2ed1, #7a2ee8);
+  box-shadow: 0 0 14px rgba(255,46,209,0.7);
+  transform: translateY(-4px);
+}
+.wcard-word { font-size: 17px; font-weight: 700; color: #fff; white-space: nowrap; }
+.wcard-word b { color: #fffb2e; text-shadow: 0 0 8px #fffb2e; }
+.wcard-ipa { font-size: 11px; color: #d9d5f0; margin-top: 2px; }
+
+.phase-tag { font-size: 18px; font-weight: 700; color: #26f7e8; text-shadow: 0 0 10px #26f7e8; margin-top: 8px; }
 
 .popup {
-  position: absolute; top: 40%; left: 50%; transform: translate(-50%, -50%);
-  font-size: 26px; font-weight: 900; opacity: 0; pointer-events: none;
+  position: absolute; top: 42%; left: 50%; transform: translate(-50%, -50%);
+  font-size: 30px; font-weight: 900; opacity: 0; pointer-events: none;
 }
 .popup.show { opacity: 1; transition: opacity 0.05s; }
 .popup.grade-PERFECT { color: #fffb2e; text-shadow: 0 0 14px #fffb2e; }
-.popup.grade-GOOD { color: #26f7e8; text-shadow: 0 0 14px #26f7e8; }
 .popup.grade-OK { color: #ff9d2e; text-shadow: 0 0 10px #ff9d2e; }
 .popup.grade-MISS { color: #ff2e5d; text-shadow: 0 0 10px #ff2e5d; }
 
@@ -153,3 +160,8 @@ html, body {
 .score-pass { color: #26f7e8; text-shadow: 0 0 20px #26f7e8; }
 .score-fail { color: #ff2e5d; text-shadow: 0 0 20px #ff2e5d; }
 .score-line { color: #b9b3d6; font-size: 13px; margin-bottom: 12px; }
+.result-list { width: 100%; max-width: 340px; display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+.result-row {
+  display: flex; justify-content: space-between; padding: 8px 14px;
+  background: rgba(255,255,255,0.06); border-radius: 10px; font-size: 14px;
+}

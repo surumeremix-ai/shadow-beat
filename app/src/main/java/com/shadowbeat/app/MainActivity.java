@@ -165,6 +165,10 @@ public class MainActivity extends AppCompatActivity {
                     @Override public void onError(String utteranceId) {
                         toPage("window.onSpeakDone && window.onSpeakDone('" + esc(utteranceId) + "')");
                     }
+                    @Override public void onRangeStart(String utteranceId, int start, int end, int frame) {
+                        toPage("window.onSpeakRange && window.onSpeakRange('" + esc(utteranceId)
+                                + "'," + start + "," + end + ")");
+                    }
                 });
             }
         });
