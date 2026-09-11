@@ -45,7 +45,13 @@ async function startMicCapture() {
     return { ok: false, error: "mediaDevices API unavailable in this WebView" };
   }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+      },
+    });
     state.audioCtx = state.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     const source = state.audioCtx.createMediaStreamSource(stream);
     state.analyser = state.audioCtx.createAnalyser();
