@@ -114,13 +114,16 @@ function screenTracks() {
 async function startSession(trackKey) {
   const status = await checkMicPermission();
   if (status === "granted") {
-    const ok = await startMicCapture();
-    if (!ok) { alert("マイクを起動できませんでした。もう一度お試しください。"); return; }
+    const result = await startMicCapture();
+    if (!result.ok) {
+      alert("マイクを起動できませんでした。\n詳細: " + result.error);
+      return;
+    }
     runSession(trackKey);
   } else if (status === "asked") {
     alert("マイクの許可を確認しました。もう一度コースを選んでください。");
   } else {
-    alert("マイクが使えないと判定できません。");
+    alert("マイクが使えないと判定できません。(Android連携が見つかりません)");
   }
 }
 

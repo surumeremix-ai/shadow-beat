@@ -40,7 +40,10 @@ async function checkMicPermission() {
 }
 
 async function startMicCapture() {
-  if (state.micReady) return true;
+  if (state.micReady) return { ok: true };
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return { ok: false, error: "mediaDevices API unavailable in this WebView" };
+  }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     state.audioCtx = state.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
@@ -50,10 +53,10 @@ async function startMicCapture() {
     source.connect(state.analyser);
     state.micReady = true;
     pollMic();
-    return true;
+    return { ok: true };
   } catch (e) {
     console.warn("mic unavailable", e);
-    return false;
+    return { ok: false, error: (e && e.name ? e.name : "Error") + ": " + (e && e.message ? e.message : String(e)) };
   }
 }
 
